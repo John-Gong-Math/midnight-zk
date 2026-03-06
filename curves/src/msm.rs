@@ -523,6 +523,72 @@ pub fn msm_best<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
     acc.into_iter().sum::<_>()
 }
 
+/// VROOM-based MSM for BLS12-381 G1.
+///
+/// Uses VROOM's RNS-based Pippenger MSM implementation via FFI.
+/// Points must be in affine form (BLST Montgomery representation).
+/// Scalars are BLS12-381 scalar field elements.
+#[cfg(feature = "vroom-msm")]
+#[allow(unsafe_code)]
+pub fn msm_vroom(coeffs: &[crate::Fq], bases: &[crate::G1Affine]) -> crate::G1Projective {
+    use std::sync::OnceLock;
+
+    assert_eq!(coeffs.len(), bases.len());
+
+    if coeffs.is_empty() {
+        return <crate::G1Projective as group::Group>::identity();
+    }
+
+    struct VroomContext {
+        ptr: *mut std::ffi::c_void,
+    }
+
+    // SAFETY: The VROOM context is thread-safe (read-only after init).
+    unsafe impl Send for VroomContext {}
+    unsafe impl Sync for VroomContext {}
+
+    impl Drop for VroomContext {
+        fn drop(&mut self) {
+            unsafe {
+                vroom_msm_sys::vroom_bls12_381_free(self.ptr);
+            }
+        }
+    }
+
+    static CTX: OnceLock<VroomContext> = OnceLock::new();
+    let ctx = CTX.get_or_init(|| {
+        let ptr = unsafe { vroom_msm_sys::vroom_bls12_381_init() };
+        assert!(!ptr.is_null(), "Failed to initialize VROOM context");
+        VroomContext { ptr }
+    });
+
+    // G1Affine is #[repr(transparent)] over blst_p1_affine (96 bytes).
+    // Zero-copy reinterpretation.
+    let points_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(bases.as_ptr() as *const u8, bases.len() * 96)
+    };
+
+    // Scalars: convert to LE bytes via to_bytes_le()
+    let scalar_bytes: Vec<u8> = coeffs
+        .iter()
+        .flat_map(|s| s.to_bytes_le())
+        .collect();
+
+    let mut out = [0u8; 144]; // blst_p1 projective = 144 bytes
+    unsafe {
+        vroom_msm_sys::vroom_g1_msm_parallel(
+            ctx.ptr,
+            out.as_mut_ptr(),
+            points_bytes.as_ptr(),
+            scalar_bytes.as_ptr(),
+            bases.len(),
+            0, // auto-detect threads
+        );
+        // G1Projective is #[repr(transparent)] over blst_p1 (144 bytes).
+        std::mem::transmute(out)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::ops::Neg;

@@ -141,6 +141,19 @@ pub fn msm_specific<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C::Curve]) ->
         return C::Curve::identity();
     }
 
+    // VROOM MSM: use RNS-based Pippenger for all BLS12-381 G1 MSMs
+    #[cfg(feature = "vroom-msm")]
+    if TypeId::of::<C>() == TypeId::of::<midnight_curves::G1Affine>() {
+        let mut affine_bases = vec![C::identity(); coeffs.len()];
+        C::Curve::batch_normalize(&bases, &mut affine_bases);
+        // SAFETY: We verified C == G1Affine via TypeId check above
+        let coeffs_fq = unsafe { &*(coeffs.as_slice() as *const _ as *const [Fq]) };
+        let affine_g1 =
+            unsafe { &*(affine_bases.as_slice() as *const _ as *const [midnight_curves::G1Affine]) };
+        let res = midnight_curves::msm::msm_vroom(coeffs_fq, affine_g1);
+        return unsafe { std::mem::transmute_copy(&res) };
+    }
+
     // We empirically checked that for MSMs larger than 2**18, the blstrs
     // implementation regresses.
     if coeffs.len() <= (2 << 18) && TypeId::of::<C>() == TypeId::of::<midnight_curves::G1Affine>() {

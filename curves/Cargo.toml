@@ -27,6 +27,7 @@ ff = { workspace = true }
 group = { workspace = true, features = ["tests"] }
 rayon = "1.10"
 paste = "1.0"
+vroom-msm-sys = { path = "../vroom-msm-sys", optional = true }
 lazy_static = "1.4"
 hex = { version = "0.4.3", optional = true, features = ["serde"] }
 
@@ -57,6 +58,7 @@ serde = ["dep:serde", "dep:serde_arrays", "dep:hex"]
 portable = ["blst/portable"]
 __private_bench = []
 dev-curves = []
+vroom-msm = ["dep:vroom-msm-sys"]
 
 [[bench]]
 name = "field_arith"
