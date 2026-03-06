@@ -32,6 +32,10 @@ name = "zswap_output"
 required-features = ["bench-internal"]
 harness = false
 
+[[bench]]
+name = "msm_specific"
+harness = false
+
 [dependencies]
 ff = { workspace = true }
 group = { workspace = true }
@@ -53,6 +57,7 @@ num-bigint = { workspace = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
+rand_xorshift = "0.3.0"
 proptest = "1"
 serde_json = { workspace = true }
 midnight-circuits = { path = "../circuits" }

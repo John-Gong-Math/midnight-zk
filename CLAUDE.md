@@ -94,3 +94,7 @@ New files should include this Apache 2.0 header:
 ## Workspace Patches
 
 The root `Cargo.toml` patches `crates-io` and the GitHub URL to use local crate paths. This ensures type unification across workspace members and third-party integrations that depend on published versions.
+
+## Taking notes
+
+When required to take notes with regard to the conversation, write the conversation contents into a markdown file with the specified name under the folder `./notes`.

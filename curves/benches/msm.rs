@@ -115,6 +115,40 @@ fn setup<C: CurveAffine>() -> (Vec<C>, Vec<Vec<C::ScalarExt>>) {
     (bases, coeffs)
 }
 
+/// Inlined version of `msm_specific` from proofs/src/poly/kzg/msm.rs.
+/// This is the hybrid MSM used in KZG: uses BLST multi_exp for sizes <= 2^19,
+/// falls back to msm_best for larger inputs.
+#[allow(unsafe_code)]
+fn msm_specific(coeffs: &[midnight_curves::Fq], bases: &[midnight_curves::G1Projective]) -> midnight_curves::G1Projective {
+    use std::any::TypeId;
+    use ff::Field;
+    use group::{Curve, Group};
+    use group::prime::PrimeCurveAffine;
+    use midnight_curves::{Fq, G1Projective, G1Affine};
+
+    // Remove zeros
+    let (coeffs, bases): (Vec<Fq>, Vec<G1Projective>) = coeffs
+        .iter()
+        .zip(bases)
+        .filter(|(s, _)| !s.is_zero_vartime())
+        .map(|(s, b)| (*s, *b))
+        .unzip();
+
+    if coeffs.is_empty() {
+        return G1Projective::identity();
+    }
+
+    // For MSMs larger than 2**18, the blstrs implementation regresses.
+    if coeffs.len() <= (2 << 18) && TypeId::of::<G1Affine>() == TypeId::of::<G1Affine>() {
+        let res = G1Projective::multi_exp(&bases, &coeffs);
+        res
+    } else {
+        let mut affine_bases = vec![G1Affine::identity(); coeffs.len()];
+        G1Projective::batch_normalize(&bases, &mut affine_bases);
+        midnight_curves::msm::msm_best(&coeffs, &affine_bases)
+    }
+}
+
 fn msm_blst(c: &mut Criterion) {
     let mut group = c.benchmark_group("Msm");
     group.significance_level(0.1).sample_size(SAMPLE_SIZE);
@@ -143,6 +177,20 @@ fn msm_blst(c: &mut Criterion) {
             group.bench_function(BenchmarkId::new("msm_best", id), |b| {
                 b.iter(|| {
                     midnight_curves::msm::msm_best(&coeffs[b_index][..n], &bases[..n]);
+                })
+            });
+        }
+    }
+
+    // msm_specific version (hybrid: BLST for <=2^19, msm_best for larger).
+    for (b_index, b) in BITS.iter().enumerate() {
+        for k in MULTICORE_RANGE {
+            let n: usize = 1 << k;
+            let id = format!("msm_specific_{b}b_{k}");
+            let points: Vec<midnight_curves::G1Projective> = bases.iter().map(Into::into).collect();
+            group.bench_function(BenchmarkId::new("msm_specific", id), |b| {
+                b.iter(|| {
+                    msm_specific(&coeffs[b_index][..n], &points[..n])
                 })
             });
         }
