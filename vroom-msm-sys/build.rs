@@ -18,8 +18,20 @@ fn main() {
     // We only need the BLST headers for type definitions in ffi_wrapper.cpp.
 
     // Compile C++ FFI wrapper (links against blst symbols at final link time)
-    cc::Build::new()
-        .cpp(true)
+    // VROOM requires clang for correct AVX-512 IFMA codegen (GCC miscompiles).
+    let mut build = cc::Build::new();
+    build.cpp(true);
+
+    // Prefer clang++ if available (VROOM recommends clang)
+    if std::process::Command::new("clang++")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        build.compiler("clang++");
+    }
+
+    build
         .file("src/ffi_wrapper.cpp")
         .include("vroom")
         .include("vroom/blst")
