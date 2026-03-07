@@ -99,16 +99,19 @@ static AffinePoint<RingType::StandardElement> blst_affine_to_vroom(
     return result;
 }
 
-// Convert a VROOM ProjectivePoint to BLST projective (Montgomery) format.
+// Convert a VROOM ProjectivePoint to BLST projective (Montgomery/Jacobian) format.
 // The output is written as a blst_p1: 3 x vec384 (X, Y, Z) = 144 bytes.
+//
+// IMPORTANT: VROOM uses standard projective coordinates where (X:Y:Z) means
+// affine (X/Z, Y/Z). BLST uses Jacobian coordinates where (X:Y:Z) means
+// affine (X/Z², Y/Z³). We must convert:
+//   X_jac = X_proj * Z_proj,  Y_jac = Y_proj * Z_proj²,  Z_jac = Z_proj
 static void vroom_proj_to_blst(
     uint8_t* out,
     const ProjectivePoint<RingType::StandardElement>& point,
     const RingType& ring,
     const BigInt& q
 ) {
-    // Convert each coordinate from RNS to BigInt (normal form),
-    // then to BLST Montgomery form.
     BigInt x_bi = ring.to_bigint(point.x);
     BigInt y_bi = ring.to_bigint(point.y);
     BigInt z_bi = ring.to_bigint(point.z);
@@ -118,13 +121,16 @@ static void vroom_proj_to_blst(
     memset(&blst_point, 0, sizeof(blst_point));
 
     if (z_bi == BigInt(0)) {
-        // Point at infinity
         memcpy(out, &blst_point, sizeof(POINTonE1));
         return;
     }
 
-    bigint_to_vec384_mont(blst_point.X, x_bi);
-    bigint_to_vec384_mont(blst_point.Y, y_bi);
+    // Convert standard projective → Jacobian
+    BigInt x_jac = (x_bi * z_bi) % q;
+    BigInt y_jac = (y_bi * z_bi % q) * z_bi % q;
+
+    bigint_to_vec384_mont(blst_point.X, x_jac);
+    bigint_to_vec384_mont(blst_point.Y, y_jac);
     bigint_to_vec384_mont(blst_point.Z, z_bi);
 
     memcpy(out, &blst_point, sizeof(POINTonE1));
@@ -169,10 +175,8 @@ void vroom_g1_msm(
     }
 
     // Run single-threaded MSM
-    // Use 256 instead of 255 scalar bits to avoid carry_possible=true path
-    // (255 % 5 == 0 triggers PointAdd(identity, identity) which is broken)
     auto result = msm(c->g1_curve, c->ring, vroom_points.data(),
-                      scalar_ptrs.data(), npoints, 256);
+                      scalar_ptrs.data(), npoints, 255);
 
     // Convert result back to BLST format
     vroom_proj_to_blst(out, result, c->ring, c->q);
@@ -207,9 +211,8 @@ void vroom_g1_msm_parallel(
     }
 
     // Run parallel MSM
-    // Use 256 instead of 255 scalar bits (same carry_possible fix as above)
     auto result = msm_parallel(c->g1_curve, c->ring, vroom_points.data(),
-                                scalar_ptrs.data(), npoints, 256, num_threads);
+                                scalar_ptrs.data(), npoints, 255, num_threads);
 
     // Convert result back to BLST format
     vroom_proj_to_blst(out, result, c->ring, c->q);
