@@ -528,7 +528,6 @@ pub fn msm_best<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
 /// Uses VROOM's RNS-based Pippenger MSM implementation via FFI.
 /// Points must be in affine form (BLST Montgomery representation).
 /// Scalars are BLS12-381 scalar field elements.
-#[cfg(feature = "vroom-msm")]
 #[allow(unsafe_code)]
 pub fn msm_vroom(coeffs: &[crate::Fq], bases: &[crate::G1Affine]) -> crate::G1Projective {
     use std::sync::OnceLock;

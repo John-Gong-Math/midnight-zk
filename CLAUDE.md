@@ -40,6 +40,11 @@ cargo +nightly fmt --all -- --check
 
 # Check documentation links
 cargo doc --workspace --document-private-items --no-deps
+
+# Benchmarks (uses criterion)
+cargo bench -p midnight-curves -- msm
+cargo bench -p midnight-proofs -- plonk
+cargo bench -p midnight-circuits -- poseidon
 ```
 
 **Parallelism:** Control thread count with `RAYON_NUM_THREADS` env var.
@@ -56,6 +61,7 @@ cargo doc --workspace --document-private-items --no-deps
 | `aggregator/` | midnight-aggregator | Proof aggregation toolkit |
 | `zkir/` | midnight-zkir | ZKIR circuit parser |
 | `zk_stdlib/` | midnight-zk-stdlib | High-level standard library with `Relation` trait abstraction |
+| `vroom-msm-sys/` | vroom-msm-sys | FFI crate for VROOM BLS12-381 multi-scalar multiplication (C++ with `cc` build) |
 
 ## Architecture
 

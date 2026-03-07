@@ -6,7 +6,7 @@ use itertools::izip;
 use midnight_curves::{
     msm::msm_best,
     pairing::{Engine, MillerLoopResult, MultiMillerLoop},
-    CurveAffine, Fq, G1Projective,
+    CurveAffine, Fq,
 };
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
@@ -142,7 +142,6 @@ pub fn msm_specific<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C::Curve]) ->
     }
 
     // VROOM MSM: use RNS-based Pippenger for all BLS12-381 G1 MSMs
-    #[cfg(feature = "vroom-msm")]
     if TypeId::of::<C>() == TypeId::of::<midnight_curves::G1Affine>() {
         let mut affine_bases = vec![C::identity(); coeffs.len()];
         C::Curve::batch_normalize(&bases, &mut affine_bases);
@@ -154,21 +153,9 @@ pub fn msm_specific<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C::Curve]) ->
         return unsafe { std::mem::transmute_copy(&res) };
     }
 
-    // We empirically checked that for MSMs larger than 2**18, the blstrs
-    // implementation regresses.
-    if coeffs.len() <= (2 << 18) && TypeId::of::<C>() == TypeId::of::<midnight_curves::G1Affine>() {
-        // Safe: we just checked type
-        let coeffs_slice = coeffs.as_slice();
-        let bases_slice = bases.as_slice();
-        let coeffs = unsafe { &*(coeffs_slice as *const _ as *const [Fq]) };
-        let bases = unsafe { &*(bases_slice as *const _ as *const [G1Projective]) };
-        let res = G1Projective::multi_exp(bases, coeffs);
-        unsafe { std::mem::transmute_copy(&res) }
-    } else {
-        let mut affine_bases = vec![C::identity(); coeffs.len()];
-        C::Curve::batch_normalize(&bases, &mut affine_bases);
-        msm_best(&coeffs, &affine_bases)
-    }
+    let mut affine_bases = vec![C::identity(); coeffs.len()];
+    C::Curve::batch_normalize(&bases, &mut affine_bases);
+    msm_best(&coeffs, &affine_bases)
 }
 
 /// Two channel MSM accumulator

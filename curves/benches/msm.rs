@@ -197,18 +197,15 @@ fn msm_blst(c: &mut Criterion) {
     }
 
     // VROOM MSM version.
-    #[cfg(feature = "vroom-msm")]
-    {
-        for (b_index, b) in BITS.iter().enumerate() {
-            for k in MULTICORE_RANGE {
-                let n: usize = 1 << k;
-                let id = format!("vroom_{b}b_{k}");
-                group.bench_function(BenchmarkId::new("vroom", id), |bench| {
-                    bench.iter(|| {
-                        midnight_curves::msm::msm_vroom(&coeffs[b_index][..n], &bases[..n])
-                    })
-                });
-            }
+    for (b_index, b) in BITS.iter().enumerate() {
+        for k in MULTICORE_RANGE {
+            let n: usize = 1 << k;
+            let id = format!("vroom_{b}b_{k}");
+            group.bench_function(BenchmarkId::new("vroom", id), |bench| {
+                bench.iter(|| {
+                    midnight_curves::msm::msm_vroom(&coeffs[b_index][..n], &bases[..n])
+                })
+            });
         }
     }
 

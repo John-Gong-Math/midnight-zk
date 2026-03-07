@@ -79,7 +79,6 @@ default = ["committed-instances"]
 circuit-params = []
 derive_serde = ["midnight-curves/serde"]
 dev-curves = ["midnight-curves/serde"]
-vroom-msm = ["midnight-curves/vroom-msm"]
 
 # This feature truncates challenges to half the size of the scalar field.
 truncated-challenges = []
