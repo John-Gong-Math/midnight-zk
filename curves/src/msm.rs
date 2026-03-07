@@ -724,6 +724,44 @@ mod test {
         unsafe { vroom_msm_sys::vroom_bls12_381_free(ctx) };
     }
 
+    /// Test VROOM MSM with trivial inputs to isolate scalar mult vs accumulation.
+    #[test]
+    fn test_msm_vroom_trivial() {
+        use group::prime::PrimeCurveAffine;
+
+        let gen = crate::G1Affine::generator();
+
+        // Test 1: MSM with 1 point, scalar = 1 → should return the point
+        let one = crate::Fq::ONE;
+        let result = super::msm_vroom(&[one], &[gen]);
+        assert_eq!(
+            gen,
+            result.to_affine(),
+            "VROOM: 1*G != G (scalar mult broken)"
+        );
+
+        // Test 2: MSM with 1 point, scalar = 2 → should return 2*G
+        let two = crate::Fq::from(2u64);
+        let expected = gen + gen;
+        let result = super::msm_vroom(&[two], &[gen]);
+        assert_eq!(
+            expected,
+            result.to_affine(),
+            "VROOM: 2*G != G+G (scalar mult broken)"
+        );
+
+        // Test 3: MSM with 2 points, both scalar = 1 → should return G + G2
+        let g2_proj = <crate::G1Projective as Group>::random(OsRng);
+        let g2 = g2_proj.to_affine();
+        let expected = (crate::G1Projective::from(gen) + g2_proj).to_affine();
+        let result = super::msm_vroom(&[one, one], &[gen, g2]);
+        assert_eq!(
+            expected,
+            result.to_affine(),
+            "VROOM: 1*G + 1*G2 wrong (accumulation broken)"
+        );
+    }
+
     /// Test VROOM MSM correctness against msm_best for BLS12-381 G1.
     #[test]
     fn test_msm_vroom_correctness() {
