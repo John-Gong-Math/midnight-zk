@@ -9,10 +9,7 @@
 #include "../vroom/cpu/precompute/gmp_wrapper.hpp"
 extern "C" {
 #include "../vroom/blst/vect.h"
-#include "../vroom/blst/fields.h"
-#include "../vroom/blst/consts.h"
 #include "../vroom/blst/point.h"
-#include "../vroom/blst/bytes.h"
 }
 #include "../vroom/src/msm.hpp"
 #include "../vroom/src/bounded_ring.hpp"
@@ -23,6 +20,25 @@ extern "C" {
 // BLS12-381 base field modulus
 static const char* BLS12_381_Q_HEX =
     "1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab";
+
+// Montgomery constants for converting between BLST Montgomery form and normal form.
+// R = 2^384, R_inv = R^{-1} mod P.
+struct MontgomeryConstants {
+    BigInt P;
+    BigInt R;
+    BigInt R_inv;
+
+    MontgomeryConstants()
+        : P(BLS12_381_Q_HEX, 16)
+        , R(BigInt(1) << 384)
+        , R_inv(R.mod_inverse(P))
+    {}
+};
+
+static const MontgomeryConstants& mont_consts() {
+    static MontgomeryConstants mc;
+    return mc;
+}
 
 // Ring type for BLS12-381 Fp
 using RingType = BoundedRing<381, 8, 52, -1932, 2377, 12>;
@@ -40,35 +56,34 @@ struct VroomBls12381Context {
     {}
 };
 
-// Convert BLST Montgomery vec384 to a normal-form BigInt
+// Convert BLST Montgomery vec384 to a normal-form BigInt.
+// Uses pure GMP arithmetic instead of BLST functions to avoid symbol conflicts.
 static BigInt vec384_mont_to_bigint(const vec384 a) {
-    vec384 normal;
-    from_fp(normal, a);
-    BigInt result(0);
+    const auto& mc = mont_consts();
+    // Read 6 limbs as a 384-bit integer (little-endian limbs)
+    BigInt mont_val(0);
     BigInt two_to_64 = BigInt(1) << 64;
     for (int i = 5; i >= 0; i--) {
-        result = result * two_to_64 + BigInt(static_cast<unsigned long>(normal[i]));
+        mont_val = mont_val * two_to_64 + BigInt(static_cast<unsigned long>(a[i]));
     }
-    return result;
+    // Convert from Montgomery: a_normal = a_mont * R^{-1} mod P
+    return (mont_val * mc.R_inv) % mc.P;
 }
 
-// Convert a normal-form BigInt to BLST Montgomery vec384
+// Convert a normal-form BigInt to BLST Montgomery vec384.
+// Uses pure GMP arithmetic instead of BLST functions to avoid symbol conflicts.
 static void bigint_to_vec384_mont(vec384 out, const BigInt& a) {
-    // BigInt -> normal vec384
-    vec384 normal;
-    memset(normal, 0, sizeof(vec384));
-
-    BigInt temp = a;
+    const auto& mc = mont_consts();
+    // Convert to Montgomery: a_mont = a_normal * R mod P
+    BigInt mont_val = (a * mc.R) % mc.P;
+    // Write to limbs (little-endian)
+    memset(out, 0, sizeof(vec384));
+    BigInt temp = mont_val;
     BigInt mask64 = (BigInt(1) << 64) - BigInt(1);
     for (int i = 0; i < 6; i++) {
-        normal[i] = static_cast<limb_t>((temp & mask64).to_ulong());
+        out[i] = static_cast<limb_t>((temp & mask64).to_ulong());
         temp = temp >> 64;
     }
-
-    // normal -> Montgomery: multiply by R^2 then reduce
-    vec768 prod;
-    mul_384(prod, normal, BLS12_381_RR);
-    redc_fp(out, prod);
 }
 
 // Convert a BLST affine point (Montgomery) to a VROOM AffinePoint (RNS)
