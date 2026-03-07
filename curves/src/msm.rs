@@ -676,4 +676,37 @@ mod test {
     fn test_msm_cross() {
         run_msm_cross::<G1Affine>(14, 18);
     }
+
+    /// Test VROOM MSM correctness against msm_best for BLS12-381 G1.
+    #[test]
+    fn test_msm_vroom_correctness() {
+        use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
+        type G1A = crate::G1Affine;
+        type Scalar = crate::Fq;
+
+        for k in [1, 2, 5, 8, 10, 12] {
+            let n = 1usize << k;
+            let points = (0..n)
+                .into_par_iter()
+                .map(|_| <crate::G1Projective as Group>::random(OsRng))
+                .collect::<Vec<_>>();
+            let mut affine_points = vec![G1A::identity(); n];
+            crate::G1Projective::batch_normalize(&points, &mut affine_points);
+
+            let scalars: Vec<Scalar> = (0..n)
+                .into_par_iter()
+                .map(|_| Scalar::random(OsRng))
+                .collect();
+
+            let expected = super::msm_best(&scalars, &affine_points);
+            let got = super::msm_vroom(&scalars, &affine_points);
+
+            assert_eq!(
+                expected.to_affine(),
+                got.to_affine(),
+                "VROOM MSM mismatch at k={k} (n={n})"
+            );
+        }
+    }
 }

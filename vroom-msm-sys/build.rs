@@ -28,9 +28,10 @@ fn main() {
         .include("vroom/cpu/precompute")
         .include("vroom/cpu/reduction")
         .flag("-std=c++20")
+        .flag("-march=native")
         .flag("-mavx512ifma")
         .flag("-D__ADX__")
-        .flag("-O2")
+        .flag("-O3")
         .compile("vroom_msm");
 
     // VROOM's RNS precomputation requires GMP
