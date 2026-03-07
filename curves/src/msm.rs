@@ -681,6 +681,7 @@ mod test {
     #[test]
     #[allow(unsafe_code)]
     fn test_vroom_roundtrip_conversion() {
+        use group::prime::PrimeCurveAffine;
         let gen = crate::G1Affine::generator();
         let ctx = unsafe { vroom_msm_sys::vroom_bls12_381_init() };
 
