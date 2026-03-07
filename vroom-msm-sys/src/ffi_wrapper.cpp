@@ -169,8 +169,10 @@ void vroom_g1_msm(
     }
 
     // Run single-threaded MSM
+    // Use 256 instead of 255 scalar bits to avoid carry_possible=true path
+    // (255 % 5 == 0 triggers PointAdd(identity, identity) which is broken)
     auto result = msm(c->g1_curve, c->ring, vroom_points.data(),
-                      scalar_ptrs.data(), npoints, 255);
+                      scalar_ptrs.data(), npoints, 256);
 
     // Convert result back to BLST format
     vroom_proj_to_blst(out, result, c->ring, c->q);
@@ -205,8 +207,9 @@ void vroom_g1_msm_parallel(
     }
 
     // Run parallel MSM
+    // Use 256 instead of 255 scalar bits (same carry_possible fix as above)
     auto result = msm_parallel(c->g1_curve, c->ring, vroom_points.data(),
-                                scalar_ptrs.data(), npoints, 255, num_threads);
+                                scalar_ptrs.data(), npoints, 256, num_threads);
 
     // Convert result back to BLST format
     vroom_proj_to_blst(out, result, c->ring, c->q);
