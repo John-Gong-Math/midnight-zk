@@ -9,6 +9,7 @@
 #include "../vroom/cpu/precompute/gmp_wrapper.hpp"
 extern "C" {
 #include "../vroom/blst/vect.h"
+#include "../vroom/blst/fields.h"
 #include "../vroom/blst/point.h"
 }
 #include "../vroom/src/msm.hpp"
@@ -16,29 +17,6 @@ extern "C" {
 #include "../vroom/src/conversion_inversion.hpp"
 #include <cstring>
 #include <vector>
-
-// BLS12-381 base field modulus
-static const char* BLS12_381_Q_HEX =
-    "1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab";
-
-// Montgomery constants for converting between BLST Montgomery form and normal form.
-// R = 2^384, R_inv = R^{-1} mod P.
-struct MontgomeryConstants {
-    BigInt P;
-    BigInt R;
-    BigInt R_inv;
-
-    MontgomeryConstants()
-        : P(BLS12_381_Q_HEX, 16)
-        , R(BigInt(1) << 384)
-        , R_inv(R.mod_inverse(P))
-    {}
-};
-
-static const MontgomeryConstants& mont_consts() {
-    static MontgomeryConstants mc;
-    return mc;
-}
 
 // Ring type for BLS12-381 Fp
 using RingType = BoundedRing<381, 8, 52, -1932, 2377, 12>;
@@ -50,40 +28,47 @@ struct VroomBls12381Context {
     G1<RingType> g1_curve;
 
     VroomBls12381Context()
-        : q(BLS12_381_Q_HEX, 16)
+        : q("1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab", 16)
         , ring(q)
         , g1_curve()
     {}
 };
 
-// Convert BLST Montgomery vec384 to a normal-form BigInt.
-// Uses pure GMP arithmetic instead of BLST functions to avoid symbol conflicts.
-static BigInt vec384_mont_to_bigint(const vec384 a) {
-    const auto& mc = mont_consts();
-    // Read 6 limbs as a 384-bit integer (little-endian limbs)
-    BigInt mont_val(0);
-    BigInt two_to_64 = BigInt(1) << 64;
-    for (int i = 5; i >= 0; i--) {
-        mont_val = mont_val * two_to_64 + BigInt(static_cast<unsigned long>(a[i]));
-    }
-    // Convert from Montgomery: a_normal = a_mont * R^{-1} mod P
-    return (mont_val * mc.R_inv) % mc.P;
+// ---------- Fast fixed-width Montgomery conversion ----------
+//
+// Uses BLST's assembly-optimized from_mont_384 / mul_mont_384 instead of
+// GMP arbitrary-precision modular arithmetic. Combined with mpz_import/export
+// for zero-copy BigInt construction, this eliminates the O(n) GMP bottleneck.
+
+// Read a vec384 (6 little-endian 64-bit limbs) into a BigInt via mpz_import.
+// No arithmetic — just a memcpy into GMP's internal representation.
+static BigInt bigint_from_vec384(const vec384 a) {
+    mpz_class result;
+    mpz_import(result.get_mpz_t(), 6, -1, sizeof(limb_t), 0, 0, a);
+    return BigInt(result);
 }
 
-// Convert a normal-form BigInt to BLST Montgomery vec384.
-// Uses pure GMP arithmetic instead of BLST functions to avoid symbol conflicts.
-static void bigint_to_vec384_mont(vec384 out, const BigInt& a) {
-    const auto& mc = mont_consts();
-    // Convert to Montgomery: a_mont = a_normal * R mod P
-    BigInt mont_val = (a * mc.R) % mc.P;
-    // Write to limbs (little-endian)
+// Write a BigInt to a vec384 (6 little-endian 64-bit limbs) via mpz_export.
+static void bigint_to_vec384(vec384 out, const BigInt& a) {
     memset(out, 0, sizeof(vec384));
-    BigInt temp = mont_val;
-    BigInt mask64 = (BigInt(1) << 64) - BigInt(1);
-    for (int i = 0; i < 6; i++) {
-        out[i] = static_cast<limb_t>((temp & mask64).to_ulong());
-        temp = temp >> 64;
-    }
+    size_t count = 0;
+    mpz_export(out, &count, -1, sizeof(limb_t), 0, 0, a.get_mpz().get_mpz_t());
+}
+
+// Convert BLST Montgomery vec384 → normal-form BigInt.
+// Uses BLST assembly for Montgomery reduction (nanoseconds), then mpz_import.
+static BigInt vec384_mont_to_bigint(const vec384 a) {
+    vec384 normal;
+    from_fp(normal, a);  // BLST assembly: a * R^{-1} mod P
+    return bigint_from_vec384(normal);
+}
+
+// Convert a normal-form BigInt → BLST Montgomery vec384.
+// Uses mpz_export then BLST assembly Montgomery multiplication with R².
+static void bigint_to_vec384_mont(vec384 out, const BigInt& a) {
+    vec384 normal;
+    bigint_to_vec384(normal, a);
+    mul_mont_384(out, normal, BLS12_381_RR, BLS12_381_P, p0);  // BLST assembly
 }
 
 // Convert a BLST affine point (Montgomery) to a VROOM AffinePoint (RNS)
@@ -125,13 +110,21 @@ static void vroom_proj_to_blst(
         return;
     }
 
-    // Convert standard projective → Jacobian
-    BigInt x_jac = (x_bi * z_bi) % q;
-    BigInt y_jac = (y_bi * z_bi % q) * z_bi % q;
+    // Convert standard projective → Jacobian using BLST Montgomery arithmetic.
+    // First convert x, y, z to Montgomery form, then use mul_fp for modular mult.
+    vec384 x_mont, y_mont, z_mont;
+    bigint_to_vec384_mont(x_mont, x_bi);
+    bigint_to_vec384_mont(y_mont, y_bi);
+    bigint_to_vec384_mont(z_mont, z_bi);
 
-    bigint_to_vec384_mont(blst_point.X, x_jac);
-    bigint_to_vec384_mont(blst_point.Y, y_jac);
-    bigint_to_vec384_mont(blst_point.Z, z_bi);
+    // X_jac = X_proj * Z_proj (in Montgomery: mul_fp handles R factor)
+    mul_fp(blst_point.X, x_mont, z_mont);
+    // Y_jac = Y_proj * Z_proj²
+    vec384 z_sq;
+    mul_fp(z_sq, z_mont, z_mont);
+    mul_fp(blst_point.Y, y_mont, z_sq);
+    // Z_jac = Z_proj
+    memcpy(blst_point.Z, z_mont, sizeof(vec384));
 
     memcpy(out, &blst_point, sizeof(POINTonE1));
 }

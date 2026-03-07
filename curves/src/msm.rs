@@ -532,7 +532,17 @@ pub fn msm_best<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
 pub fn msm_vroom(coeffs: &[crate::Fq], bases: &[crate::G1Affine]) -> crate::G1Projective {
     use std::sync::OnceLock;
 
+    use group::prime::PrimeCurveAffine;
+
     assert_eq!(coeffs.len(), bases.len());
+
+    // VROOM cannot handle identity (infinity) points — filter them out.
+    let (coeffs, bases): (Vec<crate::Fq>, Vec<crate::G1Affine>) = coeffs
+        .iter()
+        .zip(bases.iter())
+        .filter(|(_, b)| !bool::from(b.is_identity()))
+        .map(|(s, b)| (*s, *b))
+        .unzip();
 
     if coeffs.is_empty() {
         return <crate::G1Projective as group::Group>::identity();
@@ -792,6 +802,41 @@ mod test {
                 expected.to_affine(),
                 got.to_affine(),
                 "VROOM MSM mismatch at k={k} (n={n})"
+            );
+        }
+    }
+
+    /// Test VROOM MSM with identity (infinity) points mixed in.
+    #[test]
+    fn test_msm_vroom_with_identity() {
+        use group::prime::PrimeCurveAffine;
+        type G1A = crate::G1Affine;
+        type Scalar = crate::Fq;
+
+        for n in [4, 10, 32, 65] {
+            // Mix some identity points into the bases
+            let mut points: Vec<crate::G1Projective> = (0..n)
+                .map(|_| <crate::G1Projective as Group>::random(OsRng))
+                .collect();
+            // Set a few to identity
+            points[0] = <crate::G1Projective as Group>::identity();
+            if n > 5 {
+                points[n / 2] = <crate::G1Projective as Group>::identity();
+            }
+            let mut affine_points = vec![G1A::identity(); n];
+            crate::G1Projective::batch_normalize(&points, &mut affine_points);
+
+            let scalars: Vec<Scalar> = (0..n)
+                .map(|_| Scalar::random(OsRng))
+                .collect();
+
+            let expected = super::msm_best(&scalars, &affine_points);
+            let got = super::msm_vroom(&scalars, &affine_points);
+
+            assert_eq!(
+                expected.to_affine(),
+                got.to_affine(),
+                "VROOM MSM mismatch with identity points at n={n}"
             );
         }
     }

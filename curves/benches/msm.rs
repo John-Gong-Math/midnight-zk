@@ -140,8 +140,7 @@ fn msm_specific(coeffs: &[midnight_curves::Fq], bases: &[midnight_curves::G1Proj
 
     // For MSMs larger than 2**18, the blstrs implementation regresses.
     if coeffs.len() <= (2 << 18) && TypeId::of::<G1Affine>() == TypeId::of::<G1Affine>() {
-        let res = G1Projective::multi_exp(&bases, &coeffs);
-        res
+        G1Projective::multi_exp(&bases, &coeffs)
     } else {
         let mut affine_bases = vec![G1Affine::identity(); coeffs.len()];
         G1Projective::batch_normalize(&bases, &mut affine_bases);
