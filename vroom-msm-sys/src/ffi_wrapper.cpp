@@ -212,4 +212,25 @@ void vroom_g1_msm_parallel(
     vroom_proj_to_blst(out, result, c->ring, c->q);
 }
 
+// Debug: roundtrip affine point conversion (BLST → VROOM → BLST projective with Z=1)
+// Returns 144 bytes (blst_p1) with Z = R mod P (Montgomery one).
+void vroom_g1_roundtrip_affine(
+    void* ctx,
+    uint8_t* out,
+    const uint8_t* point_in
+) {
+    auto* c = static_cast<VroomBls12381Context*>(ctx);
+    const POINTonE1_affine* blst_pt = reinterpret_cast<const POINTonE1_affine*>(point_in);
+
+    // Convert BLST affine → VROOM affine
+    auto vroom_pt = blst_affine_to_vroom(*blst_pt, c->ring);
+
+    // Build a projective point with Z=1
+    auto z_one = c->ring.one();
+    ProjectivePoint<RingType::StandardElement> proj(vroom_pt.x, vroom_pt.y, z_one);
+
+    // Convert back to BLST projective
+    vroom_proj_to_blst(out, proj, c->ring, c->q);
+}
+
 } // extern "C"

@@ -677,6 +677,52 @@ mod test {
         run_msm_cross::<G1Affine>(14, 18);
     }
 
+    /// Test roundtrip conversion: BLST affine → VROOM → BLST projective.
+    #[test]
+    #[allow(unsafe_code)]
+    fn test_vroom_roundtrip_conversion() {
+        let gen = crate::G1Affine::generator();
+        let ctx = unsafe { vroom_msm_sys::vroom_bls12_381_init() };
+
+        // Roundtrip the generator through VROOM
+        let point_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(&gen as *const _ as *const u8, 96)
+        };
+        let mut out = [0u8; 144];
+        unsafe {
+            vroom_msm_sys::vroom_g1_roundtrip_affine(
+                ctx, out.as_mut_ptr(), point_bytes.as_ptr(),
+            );
+        }
+        let roundtripped: crate::G1Projective = unsafe { std::mem::transmute(out) };
+        assert_eq!(
+            gen,
+            roundtripped.to_affine(),
+            "Roundtrip conversion failed for generator"
+        );
+
+        // Also test a random point
+        let random_proj = <crate::G1Projective as Group>::random(OsRng);
+        let random_affine = random_proj.to_affine();
+        let point_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(&random_affine as *const _ as *const u8, 96)
+        };
+        let mut out = [0u8; 144];
+        unsafe {
+            vroom_msm_sys::vroom_g1_roundtrip_affine(
+                ctx, out.as_mut_ptr(), point_bytes.as_ptr(),
+            );
+        }
+        let roundtripped: crate::G1Projective = unsafe { std::mem::transmute(out) };
+        assert_eq!(
+            random_affine,
+            roundtripped.to_affine(),
+            "Roundtrip conversion failed for random point"
+        );
+
+        unsafe { vroom_msm_sys::vroom_bls12_381_free(ctx) };
+    }
+
     /// Test VROOM MSM correctness against msm_best for BLS12-381 G1.
     #[test]
     fn test_msm_vroom_correctness() {

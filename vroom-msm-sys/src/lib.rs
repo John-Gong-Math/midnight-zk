@@ -40,4 +40,12 @@ extern "C" {
         npoints: usize,
         num_threads: usize,
     );
+
+    /// Debug: roundtrip affine point through VROOM conversion.
+    /// Input: 96 bytes (blst_p1_affine). Output: 144 bytes (blst_p1 projective).
+    pub fn vroom_g1_roundtrip_affine(
+        ctx: *mut std::ffi::c_void,
+        out: *mut u8,
+        point_in: *const u8,
+    );
 }
