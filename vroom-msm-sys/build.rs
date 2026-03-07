@@ -13,24 +13,11 @@ fn main() {
         return;
     }
 
-    // 1. Compile BLST x86-64 assembly
-    cc::Build::new()
-        .file("vroom/blst/assembly_small.S")
-        .flag("-D__x86_64__")
-        .compile("blst_asm");
+    // BLST assembly and C code are NOT compiled here — those symbols are
+    // provided by the `blst` crate (dependency of midnight-curves).
+    // We only need the BLST headers for type definitions in ffi_wrapper.cpp.
 
-    // 2. Compile BLST C code (single translation unit)
-    cc::Build::new()
-        .file("vroom/blst/server_small.c")
-        .include("vroom/blst")
-        .flag("-O2")
-        .flag("-fno-builtin")
-        .flag("-fPIC")
-        .flag("-D__x86_64__")
-        .flag("-D__ADX__")
-        .compile("blst_small");
-
-    // 3. Compile C++ FFI wrapper
+    // Compile C++ FFI wrapper (links against blst symbols at final link time)
     cc::Build::new()
         .cpp(true)
         .file("src/ffi_wrapper.cpp")
@@ -45,10 +32,6 @@ fn main() {
         .flag("-D__ADX__")
         .flag("-O2")
         .compile("vroom_msm");
-
-    // Link the BLST static libs we compiled above
-    println!("cargo:rustc-link-lib=static=blst_asm");
-    println!("cargo:rustc-link-lib=static=blst_small");
 
     // VROOM's RNS precomputation requires GMP
     println!("cargo:rustc-link-lib=dylib=gmp");
