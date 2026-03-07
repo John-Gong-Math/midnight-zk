@@ -742,11 +742,11 @@ mod test {
 
         // Test 2: MSM with 1 point, scalar = 2 → should return 2*G
         let two = crate::Fq::from(2u64);
-        let expected = gen + gen;
-        let result = super::msm_vroom(&[two], &[gen]);
+        let expected = (gen + gen).to_affine();
+        let result = super::msm_vroom(&[two], &[gen]).to_affine();
         assert_eq!(
             expected,
-            result.to_affine(),
+            result,
             "VROOM: 2*G != G+G (scalar mult broken)"
         );
 
@@ -754,10 +754,10 @@ mod test {
         let g2_proj = <crate::G1Projective as Group>::random(OsRng);
         let g2 = g2_proj.to_affine();
         let expected = (crate::G1Projective::from(gen) + g2_proj).to_affine();
-        let result = super::msm_vroom(&[one, one], &[gen, g2]);
+        let result = super::msm_vroom(&[one, one], &[gen, g2]).to_affine();
         assert_eq!(
             expected,
-            result.to_affine(),
+            result,
             "VROOM: 1*G + 1*G2 wrong (accumulation broken)"
         );
     }
