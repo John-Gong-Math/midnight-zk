@@ -680,6 +680,7 @@ mod test {
     /// Test VROOM MSM correctness against msm_best for BLS12-381 G1.
     #[test]
     fn test_msm_vroom_correctness() {
+        use group::prime::PrimeCurveAffine;
         use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
         type G1A = crate::G1Affine;
