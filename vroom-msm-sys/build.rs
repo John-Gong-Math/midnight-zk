@@ -30,21 +30,26 @@ fn main() {
     // The `blst` Rust crate (depended on by midnight-curves) already provides
     // these symbols. We only need the BLST headers for type declarations.
 
-    // Use clang++ if available (better SIMD codegen than g++)
-    let cxx = if std::process::Command::new("clang++")
-        .arg("--version")
-        .output()
-        .is_ok()
-    {
-        "clang++"
-    } else {
-        "c++"
-    };
+    // Prefer g++ for VROOM's AVX-512 template code — g++ generates significantly
+    // faster code than clang++ for deeply-nested BoundedRing templates with IFMA
+    // intrinsics. Fall back to clang++ if g++ is not available.
+    let cxx = std::env::var("VROOM_CXX").unwrap_or_else(|_| {
+        if std::process::Command::new("g++")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            "g++".to_string()
+        } else {
+            "clang++".to_string()
+        }
+    });
 
     // Shared compiler settings for both TUs
     let mut base_flags = |build: &mut cc::Build| {
         build
-            .compiler(cxx)
+            .compiler(cxx.as_str())
             .cpp(true)
             .std("c++20")
             .flag("-O3")
