@@ -78,7 +78,3 @@ harness = false
 [[bench]]
 name = "pairing"
 harness = false
-
-[[bench]]
-name = "vroom_ffi_direct"
-harness = false

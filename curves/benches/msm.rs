@@ -161,14 +161,12 @@ fn msm_vroom(c: &mut Criterion) {
     let n_max: usize = 1 << max_k;
 
     let points = unsafe { vroom_msm_sys::vroom_generate_points(ctx, n_max, SEED_U64) };
-    // Wrapper now generates canonical field scalars (< r), equivalent to 255-bit
-    // inputs used by the native VROOM benchmark.
     let scalars = unsafe { vroom_msm_sys::vroom_generate_scalars(n_max, SEED_U64) };
 
     // Single-threaded VROOM.
     for k in MULTICORE_RANGE {
         let n: usize = 1 << k;
-        let id = format!("vroom_r255b_{k}");
+        let id = format!("vroom_256b_{k}");
         group.bench_function(BenchmarkId::new("Vroom", &id), |b| {
             b.iter(|| unsafe { vroom_msm_sys::vroom_g1_msm(ctx, points, scalars, n) })
         });
@@ -180,7 +178,7 @@ fn msm_vroom(c: &mut Criterion) {
         .unwrap_or(4);
     for k in MULTICORE_RANGE {
         let n: usize = 1 << k;
-        let id = format!("vroom_par_{num_threads}t_r255b_{k}");
+        let id = format!("vroom_par_{num_threads}t_256b_{k}");
         group.bench_function(BenchmarkId::new("Vroom_par", &id), |b| {
             b.iter(|| unsafe {
                 vroom_msm_sys::vroom_g1_msm_parallel(ctx, points, scalars, n, num_threads)
