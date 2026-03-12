@@ -30,19 +30,17 @@ fn main() {
     // The `blst` Rust crate (depended on by midnight-curves) already provides
     // these symbols. We only need the BLST headers for type declarations.
 
-    // Prefer g++ for VROOM's AVX-512 template code — g++ generates significantly
-    // faster code than clang++ for deeply-nested BoundedRing templates with IFMA
-    // intrinsics. Fall back to clang++ if g++ is not available.
+    // Use clang++ if available (better SIMD codegen than g++ for this code)
     let cxx = std::env::var("VROOM_CXX").unwrap_or_else(|_| {
-        if std::process::Command::new("g++")
+        if std::process::Command::new("clang++")
             .arg("--version")
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
         {
-            "g++".to_string()
-        } else {
             "clang++".to_string()
+        } else {
+            "c++".to_string()
         }
     });
 
@@ -79,7 +77,8 @@ fn main() {
     msm_build
         .file("src/wrapper_msm.cpp")
         .flag("-fno-function-sections")
-        .flag("-fno-data-sections");
+        .flag("-fno-data-sections")
+        .pic(false);
     msm_build.compile("vroom_msm");
 
     // --- TU 2: Context management and data generation ---
