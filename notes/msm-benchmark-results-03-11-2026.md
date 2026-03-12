@@ -52,3 +52,52 @@ GCP VMs: Intel Ice Lake @ 2.60GHz, AVX-512 IFMA supported.
 The 28x overhead from C++ native to Rust FFI wrapper needs investigation.
 Likely causes: point generation method, data conversion, or compilation flags.
 See: `vroom-msm-sys/src/wrapper.cpp` vs `VROOM/src/bench_msm.cpp`.
+
+## Update — Root Cause Found (March 12, 2026)
+
+The large VROOM FFI slowdown was caused by a scalar-generation mismatch in the wrapper.
+
+- Native VROOM benchmark (`vroom/src/bench_msm.cpp`) generates scalars as `BigInt::random(255) % r` (canonical field scalars, `< r`).
+- Wrapper (`vroom-msm-sys/src/wrapper.cpp`) was generating arbitrary 256-bit byte strings (not reduced mod `r`).
+
+This input mismatch forced a much slower MSM path. Once wrapper scalar generation was changed to match native semantics (`BigInt::random(255) % r` + LE serialization), performance matched native benchmarks.
+
+### Revalidated VM Results After Fix (n2-standard-16, 2^20 points)
+
+| Implementation | Time | Notes |
+|:---|:---:|:---|
+| VROOM native C++ (1 thread) | **613 ms** | `bench_msm_avx`, same VM session |
+| VROOM native C++ (parallel) | **400 ms** | `bench_msm_avx`, same VM session |
+| VROOM wrapper-path direct driver (1 thread) | 6,829 ms | Before scalar fix |
+| VROOM wrapper-path direct driver (parallel) | 5,639 ms | Before scalar fix |
+| VROOM FFI direct bench (1 thread) | **560 ms** | After scalar fix |
+| VROOM FFI direct bench (parallel) | **395 ms** | After scalar fix |
+
+### Takeaway
+
+This is not a Rust FFI boundary overhead issue. The dominant regression came from scalar format/semantics mismatch between wrapper and native benchmark inputs.
+
+## Post-Fix Full-Range Results (March 12, 2026)
+
+Full rerun on VM with:
+
+```bash
+cargo bench -p midnight-curves --bench msm -- --noplot
+```
+
+### Vroom + Vroom_par (16-core VM)
+
+| Size | Vroom FFI (1t) | Vroom FFI (16t) |
+|:---:|:---:|:---:|
+| 2^8 | 0.239 ms | 0.240 ms |
+| 2^10 | 0.689 ms | 10.96 ms |
+| 2^12 | 2.73 ms | 10.17 ms |
+| 2^14 | 8.65 ms | 11.87 ms |
+| 2^16 | 33.45 ms | 31.91 ms |
+| 2^18 | 133.69 ms | 105.01 ms |
+| 2^20 | 557.24 ms | 394.10 ms |
+
+### Summary
+
+- Post-fix VROOM FFI now matches native-scale performance at 2^20 (`~557 ms` single-thread, `~394 ms` parallel).
+- The previous multi-second slowdown is eliminated.

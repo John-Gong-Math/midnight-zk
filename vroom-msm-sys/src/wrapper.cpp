@@ -99,15 +99,13 @@ void* vroom_generate_scalars(size_t npoints, uint64_t seed) {
     sc->data.resize(npoints);
     sc->ptrs.resize(npoints);
 
-    std::mt19937_64 gen(seed);
+    (void)seed;
+    BigInt r(bls12_381_scalar_modulus_hex, 16);
 
     for (size_t i = 0; i < npoints; i++) {
-        sc->data[i].resize(32);
-        for (size_t j = 0; j < 32; j += 8) {
-            uint64_t val = gen();
-            size_t remaining = std::min(size_t(8), size_t(32) - j);
-            std::memcpy(sc->data[i].data() + j, &val, remaining);
-        }
+        BigInt s = BigInt::random(255) % r;
+        sc->data[i].resize(32, 0);
+        bigint_to_bytes_le(sc->data[i].data(), s, 32);
         sc->ptrs[i] = sc->data[i].data();
     }
 
