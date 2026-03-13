@@ -51,6 +51,23 @@ static AffPoint blst_g1_to_affine_point(const POINTonE1_affine &p, const RingTyp
     return result;
 }
 
+static BigInt random_bigint_bits(std::mt19937_64& gen, size_t bits) {
+    const size_t words = (bits + 63) / 64;
+    BigInt value(0);
+    const BigInt two_to_64("10000000000000000", 16);
+
+    for (size_t i = 0; i < words; i++) {
+        value = value * two_to_64 + BigInt(static_cast<unsigned long>(gen()));
+    }
+
+    const size_t excess_bits = (words * 64) - bits;
+    if (excess_bits > 0) {
+        value = value >> excess_bits;
+    }
+
+    return value;
+}
+
 // ----- FFI functions -----
 
 extern "C" {
@@ -73,7 +90,7 @@ void* vroom_generate_points(void* ctx_ptr, size_t npoints, uint64_t seed) {
     std::mt19937_64 gen(seed);
 
     for (size_t i = 0; i < npoints; i++) {
-        BigInt pt_scalar = BigInt::random(256) % r;
+        BigInt pt_scalar = random_bigint_bits(gen, 256) % r;
 
         byte scalar_bytes[32] = {0};
         bigint_to_bytes_le(scalar_bytes, pt_scalar, 32);
@@ -99,11 +116,11 @@ void* vroom_generate_scalars(size_t npoints, uint64_t seed) {
     sc->data.resize(npoints);
     sc->ptrs.resize(npoints);
 
-    (void)seed;
+    std::mt19937_64 gen(seed ^ 0x9e3779b97f4a7c15ULL);
     BigInt r(bls12_381_scalar_modulus_hex, 16);
 
     for (size_t i = 0; i < npoints; i++) {
-        BigInt s = BigInt::random(255) % r;
+        BigInt s = random_bigint_bits(gen, 255) % r;
         sc->data[i].resize(32, 0);
         bigint_to_bytes_le(sc->data[i].data(), s, 32);
         sc->ptrs[i] = sc->data[i].data();
