@@ -87,6 +87,18 @@ fn main() {
     gen_build.file("src/wrapper.cpp");
     gen_build.compile("vroom_gen");
 
+    // --- TU 3: BLST field inversion wrapper for batch affine MSM ---
+    // ct_inverse_mod_384_wrapper is needed by pippenger_v2's batch inversion.
+    // Compiled as C (not C++) since it uses BLST's C headers directly.
+    // Assembly symbols (ctx_inverse_mod_384, etc.) resolve from the Rust blst crate.
+    cc::Build::new()
+        .file("src/blst_inverse.c")
+        .flag("-O2")
+        .flag("-fPIC")
+        .define("__ADX__", None)
+        .include(blst_dir.as_path())
+        .compile("vroom_blst_inv");
+
     // Add GMP library search paths
     for path in &["/opt/homebrew/lib", "/usr/local/lib"] {
         if std::path::Path::new(path).exists() {
@@ -103,5 +115,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src/wrapper.cpp");
     println!("cargo:rerun-if-changed=src/wrapper_msm.cpp");
     println!("cargo:rerun-if-changed=src/wrapper_types.hpp");
+    println!("cargo:rerun-if-changed=src/blst_inverse.c");
     println!("cargo:rerun-if-changed=vroom/");
 }
