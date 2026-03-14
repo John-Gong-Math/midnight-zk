@@ -10,6 +10,7 @@
 #include "../vroom/cpu/precompute/gmp_wrapper.hpp"
 
 #include "../vroom/src/msm.hpp"
+#include "../vroom/src/pippenger.hpp"
 #include "../vroom/src/bounded_ring.hpp"
 #include "../vroom/src/conversion_inversion.hpp"
 
@@ -44,8 +45,12 @@ static std::pair<BigInt, BigInt> proj_to_affine_bigint(
 
 extern "C" {
 
-uint64_t vroom_g1_msm(void* ctx_ptr, const void* points_ptr,
-                       const void* scalars_ptr, size_t npoints) {
+namespace {
+volatile uint64_t g_msm_sink = 0;
+}
+
+void vroom_g1_msm(void* ctx_ptr, const void* points_ptr,
+                  const void* scalars_ptr, size_t npoints) {
     auto* ctx = static_cast<VroomContext*>(ctx_ptr);
     auto* pts = static_cast<const VroomPoints*>(points_ptr);
     auto* sc = static_cast<const VroomScalars*>(scalars_ptr);
@@ -54,13 +59,13 @@ uint64_t vroom_g1_msm(void* ctx_ptr, const void* points_ptr,
                       pts->data.data(), sc->ptrs.data(),
                       npoints, 255);
 
-    BigInt z = ctx->ring.to_bigint(result.z);
-    return z.to_ulong();
+    // Keep an observable side-effect so the optimizer cannot drop MSM work.
+    g_msm_sink ^= result.z.m2.to_unsigned_array()[0];
 }
 
-uint64_t vroom_g1_msm_parallel(void* ctx_ptr, const void* points_ptr,
-                                const void* scalars_ptr, size_t npoints,
-                                size_t num_threads) {
+void vroom_g1_msm_parallel(void* ctx_ptr, const void* points_ptr,
+                           const void* scalars_ptr, size_t npoints,
+                           size_t num_threads) {
     auto* ctx = static_cast<VroomContext*>(ctx_ptr);
     auto* pts = static_cast<const VroomPoints*>(points_ptr);
     auto* sc = static_cast<const VroomScalars*>(scalars_ptr);
@@ -69,8 +74,8 @@ uint64_t vroom_g1_msm_parallel(void* ctx_ptr, const void* points_ptr,
                                pts->data.data(), sc->ptrs.data(),
                                npoints, 255, num_threads);
 
-    BigInt z = ctx->ring.to_bigint(result.z);
-    return z.to_ulong();
+    // Keep an observable side-effect so the optimizer cannot drop MSM work.
+    g_msm_sink ^= result.z.m2.to_unsigned_array()[0];
 }
 
 bool vroom_g1_msm_parallel_matches_serial(
@@ -95,6 +100,33 @@ bool vroom_g1_msm_parallel_matches_serial(
     auto [px, py] = proj_to_affine_bigint(parallel, ctx->ring);
 
     return sx == px && sy == py;
+}
+
+void vroom_g1_pippenger_v1(void* ctx_ptr, const void* points_ptr,
+                           const void* scalars_ptr, size_t npoints) {
+    auto* ctx = static_cast<VroomContext*>(ctx_ptr);
+    auto* pts = static_cast<const VroomPoints*>(points_ptr);
+    auto* sc = static_cast<const VroomScalars*>(scalars_ptr);
+
+    auto result = pippenger_msm(ctx->curve, ctx->ring,
+                                pts->data.data(), sc->ptrs.data(),
+                                npoints, 255);
+
+    g_msm_sink ^= result.z.m2.to_unsigned_array()[0];
+}
+
+void vroom_g1_pippenger_v1_parallel(void* ctx_ptr, const void* points_ptr,
+                                    const void* scalars_ptr, size_t npoints,
+                                    size_t num_threads) {
+    auto* ctx = static_cast<VroomContext*>(ctx_ptr);
+    auto* pts = static_cast<const VroomPoints*>(points_ptr);
+    auto* sc = static_cast<const VroomScalars*>(scalars_ptr);
+
+    auto result = pippenger_msm_parallel(ctx->curve, ctx->ring,
+                                         pts->data.data(), sc->ptrs.data(),
+                                         npoints, 255, num_threads);
+
+    g_msm_sink ^= result.z.m2.to_unsigned_array()[0];
 }
 
 } // extern "C"

@@ -186,6 +186,26 @@ fn msm_vroom(c: &mut Criterion) {
         });
     }
 
+    // Single-threaded V1 pippenger.
+    for k in MULTICORE_RANGE {
+        let n: usize = 1 << k;
+        let id = format!("vroom_v1_256b_{k}");
+        group.bench_function(BenchmarkId::new("Vroom_v1", &id), |b| {
+            b.iter(|| unsafe { vroom_msm_sys::vroom_g1_pippenger_v1(ctx, points, scalars, n) })
+        });
+    }
+
+    // Parallel V1 pippenger (uses all available cores).
+    for k in MULTICORE_RANGE {
+        let n: usize = 1 << k;
+        let id = format!("vroom_v1_par_{num_threads}t_256b_{k}");
+        group.bench_function(BenchmarkId::new("Vroom_v1_par", &id), |b| {
+            b.iter(|| unsafe {
+                vroom_msm_sys::vroom_g1_pippenger_v1_parallel(ctx, points, scalars, n, num_threads)
+            })
+        });
+    }
+
     unsafe {
         vroom_msm_sys::vroom_free_scalars(scalars);
         vroom_msm_sys::vroom_free_points(points);

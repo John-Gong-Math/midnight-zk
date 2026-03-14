@@ -12,14 +12,27 @@ extern "C" {
         points: *const c_void,
         scalars: *const c_void,
         npoints: usize,
-    ) -> u64;
+    );
     pub fn vroom_g1_msm_parallel(
         ctx: *mut c_void,
         points: *const c_void,
         scalars: *const c_void,
         npoints: usize,
         num_threads: usize,
-    ) -> u64;
+    );
+    pub fn vroom_g1_pippenger_v1(
+        ctx: *mut c_void,
+        points: *const c_void,
+        scalars: *const c_void,
+        npoints: usize,
+    );
+    pub fn vroom_g1_pippenger_v1_parallel(
+        ctx: *mut c_void,
+        points: *const c_void,
+        scalars: *const c_void,
+        npoints: usize,
+        num_threads: usize,
+    );
     pub fn vroom_g1_msm_parallel_matches_serial(
         ctx: *mut c_void,
         points: *const c_void,
