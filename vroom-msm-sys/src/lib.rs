@@ -40,6 +40,20 @@ extern "C" {
         npoints: usize,
         num_threads: usize,
     ) -> bool;
+    pub fn vroom_g1_msm_point_parallel(
+        ctx: *mut c_void,
+        points: *const c_void,
+        scalars: *const c_void,
+        npoints: usize,
+        num_threads: usize,
+    );
+    pub fn vroom_g1_msm_point_parallel_matches_serial(
+        ctx: *mut c_void,
+        points: *const c_void,
+        scalars: *const c_void,
+        npoints: usize,
+        num_threads: usize,
+    ) -> bool;
 }
 
 #[cfg(test)]
@@ -76,6 +90,18 @@ mod tests {
         fn msm_parallel_matches_serial(&self, npoints: usize, num_threads: usize) -> bool {
             unsafe {
                 vroom_g1_msm_parallel_matches_serial(
+                    self.ctx,
+                    self.points,
+                    self.scalars,
+                    npoints,
+                    num_threads,
+                )
+            }
+        }
+
+        fn msm_point_parallel_matches_serial(&self, npoints: usize, num_threads: usize) -> bool {
+            unsafe {
+                vroom_g1_msm_point_parallel_matches_serial(
                     self.ctx,
                     self.points,
                     self.scalars,
@@ -146,6 +172,35 @@ mod tests {
                 assert!(
                     matches,
                     "parallel msm mismatch for npoints={n}, num_threads={threads}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn vroom_point_parallel_matches_serial_sweep() {
+        let _ = std::mem::size_of::<blst_p1>();
+
+        let k_values = [8usize, 10, 12, 14, 16];
+        let n_max = 1 << k_values[k_values.len() - 1];
+        let fixture = TestFixture::new(n_max);
+
+        let hw_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let thread_candidates = [1usize, 2, 4, 8, 16, hw_threads];
+
+        for &k in &k_values {
+            let n = 1 << k;
+            for &threads in &thread_candidates {
+                if threads == 0 || threads > n {
+                    continue;
+                }
+
+                let matches = fixture.msm_point_parallel_matches_serial(n, threads);
+                assert!(
+                    matches,
+                    "point-parallel msm mismatch for npoints={n}, num_threads={threads}"
                 );
             }
         }

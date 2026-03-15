@@ -206,6 +206,17 @@ fn msm_vroom(c: &mut Criterion) {
         });
     }
 
+    // Point-parallel VROOM (partitions points across threads).
+    for k in MULTICORE_RANGE {
+        let n: usize = 1 << k;
+        let id = format!("vroom_pp_{num_threads}t_256b_{k}");
+        group.bench_function(BenchmarkId::new("Vroom_pp", &id), |b| {
+            b.iter(|| unsafe {
+                vroom_msm_sys::vroom_g1_msm_point_parallel(ctx, points, scalars, n, num_threads)
+            })
+        });
+    }
+
     unsafe {
         vroom_msm_sys::vroom_free_scalars(scalars);
         vroom_msm_sys::vroom_free_points(points);
