@@ -51,6 +51,7 @@ hex = "0.4.3"
 criterion = { version = "0.7", features = ["html_reports"] }
 ark-std = "0.4"
 halo2derive = "0.2.0"
+vroom-fields-sys = { path = "../vroom-fields-sys" }
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
