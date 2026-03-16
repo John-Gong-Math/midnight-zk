@@ -208,7 +208,7 @@ fn bench_mul_chain(c: &mut Criterion) {
         bencher.iter(|| {
             let mut a = fp_a;
             for _ in 0..N_MULS {
-                a = a.mul(&fp_b);
+                a = a * fp_b;
             }
             black_box(a)
         })
@@ -275,7 +275,7 @@ fn bench_mul_chain(c: &mut Criterion) {
         bencher.iter(|| {
             let mut a = fq_a;
             for _ in 0..N_MULS {
-                a = a.mul(&fq_b);
+                a = a * fq_b;
             }
             black_box(a)
         })
@@ -360,9 +360,9 @@ fn bench_sum_of_products(c: &mut Criterion) {
     // blst Fp: 2 muls + 1 add
     group.bench_function("blst_Fp_2muls_add", |bencher| {
         bencher.iter(|| {
-            let ab = black_box(&fp_a).mul(black_box(&fp_b));
-            let cd = black_box(&fp_c).mul(black_box(&fp_d));
-            black_box(ab.add(&cd))
+            let ab = black_box(fp_a) * black_box(fp_b);
+            let cd = black_box(fp_c) * black_box(fp_d);
+            black_box(ab + cd)
         })
     });
 
@@ -384,9 +384,9 @@ fn bench_sum_of_products(c: &mut Criterion) {
     // blst Fr: 2 muls + 1 add
     group.bench_function("blst_Fr_2muls_add", |bencher| {
         bencher.iter(|| {
-            let ab = black_box(&fq_a).mul(black_box(&fq_b));
-            let cd = black_box(&fq_c).mul(black_box(&fq_d));
-            black_box(ab.add(&cd))
+            let ab = black_box(fq_a) * black_box(fq_b);
+            let cd = black_box(fq_c) * black_box(fq_d);
+            black_box(ab + cd)
         })
     });
 
