@@ -13,6 +13,7 @@ extern "C" {
     pub fn vroom_fp_load_a(ctx: *mut c_void, bytes: *const u8);
     pub fn vroom_fp_load_b(ctx: *mut c_void, bytes: *const u8);
     pub fn vroom_fp_store_result(ctx: *mut c_void, bytes: *mut u8);
+    // Benchmark ops (store to scratch, no reduction for add/sub/double)
     pub fn vroom_fp_add(ctx: *mut c_void);
     pub fn vroom_fp_sub(ctx: *mut c_void);
     pub fn vroom_fp_mul(ctx: *mut c_void);
@@ -20,6 +21,10 @@ extern "C" {
     pub fn vroom_fp_neg(ctx: *mut c_void);
     pub fn vroom_fp_double(ctx: *mut c_void);
     pub fn vroom_fp_invert(ctx: *mut c_void);
+    // Correctness extraction (add/sub/double via check_bounds)
+    pub fn vroom_fp_add_result(ctx: *mut c_void, bytes: *mut u8);
+    pub fn vroom_fp_sub_result(ctx: *mut c_void, bytes: *mut u8);
+    pub fn vroom_fp_double_result(ctx: *mut c_void, bytes: *mut u8);
 
     // ----- Fr (scalar field, 32 bytes) -----
     pub fn vroom_fr_ctx_new() -> *mut c_void;
@@ -27,6 +32,7 @@ extern "C" {
     pub fn vroom_fr_load_a(ctx: *mut c_void, bytes: *const u8);
     pub fn vroom_fr_load_b(ctx: *mut c_void, bytes: *const u8);
     pub fn vroom_fr_store_result(ctx: *mut c_void, bytes: *mut u8);
+    // Benchmark ops
     pub fn vroom_fr_add(ctx: *mut c_void);
     pub fn vroom_fr_sub(ctx: *mut c_void);
     pub fn vroom_fr_mul(ctx: *mut c_void);
@@ -34,6 +40,10 @@ extern "C" {
     pub fn vroom_fr_neg(ctx: *mut c_void);
     pub fn vroom_fr_double(ctx: *mut c_void);
     pub fn vroom_fr_invert(ctx: *mut c_void);
+    // Correctness extraction
+    pub fn vroom_fr_add_result(ctx: *mut c_void, bytes: *mut u8);
+    pub fn vroom_fr_sub_result(ctx: *mut c_void, bytes: *mut u8);
+    pub fn vroom_fr_double_result(ctx: *mut c_void, bytes: *mut u8);
 }
 
 #[cfg(test)]
@@ -116,7 +126,6 @@ mod tests {
 
     // Fixed test values for Fp
     fn test_fp_a() -> blst::blst_fp {
-        // A known value < p
         let bytes: [u8; 48] = [
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
             0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
@@ -155,14 +164,6 @@ mod tests {
         blst_fr_from_le(&bytes)
     }
 
-    fn fp_bytes_eq(a: &[u8; 48], b: &[u8; 48]) -> bool {
-        a == b
-    }
-
-    fn fr_bytes_eq(a: &[u8; 32], b: &[u8; 32]) -> bool {
-        a == b
-    }
-
     // ---- Fp tests ----
 
     #[test]
@@ -176,17 +177,16 @@ mod tests {
         unsafe {
             vroom_fp_load_a(ctx.ptr(), a_bytes.as_ptr());
             vroom_fp_load_b(ctx.ptr(), b_bytes.as_ptr());
-            vroom_fp_add(ctx.ptr());
         }
 
         let mut vroom_result = [0u8; 48];
-        unsafe { vroom_fp_store_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
+        unsafe { vroom_fp_add_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
 
         let mut blst_result = blst::blst_fp::default();
         unsafe { blst::blst_fp_add(&mut blst_result, &a, &b) };
         let blst_bytes = blst_fp_to_le(&blst_result);
 
-        assert!(fp_bytes_eq(&vroom_result, &blst_bytes), "Fp add mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fp add mismatch");
     }
 
     #[test]
@@ -200,17 +200,16 @@ mod tests {
         unsafe {
             vroom_fp_load_a(ctx.ptr(), a_bytes.as_ptr());
             vroom_fp_load_b(ctx.ptr(), b_bytes.as_ptr());
-            vroom_fp_sub(ctx.ptr());
         }
 
         let mut vroom_result = [0u8; 48];
-        unsafe { vroom_fp_store_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
+        unsafe { vroom_fp_sub_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
 
         let mut blst_result = blst::blst_fp::default();
         unsafe { blst::blst_fp_sub(&mut blst_result, &a, &b) };
         let blst_bytes = blst_fp_to_le(&blst_result);
 
-        assert!(fp_bytes_eq(&vroom_result, &blst_bytes), "Fp sub mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fp sub mismatch");
     }
 
     #[test]
@@ -234,7 +233,7 @@ mod tests {
         unsafe { blst::blst_fp_mul(&mut blst_result, &a, &b) };
         let blst_bytes = blst_fp_to_le(&blst_result);
 
-        assert!(fp_bytes_eq(&vroom_result, &blst_bytes), "Fp mul mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fp mul mismatch");
     }
 
     #[test]
@@ -255,7 +254,7 @@ mod tests {
         unsafe { blst::blst_fp_sqr(&mut blst_result, &a) };
         let blst_bytes = blst_fp_to_le(&blst_result);
 
-        assert!(fp_bytes_eq(&vroom_result, &blst_bytes), "Fp square mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fp square mismatch");
     }
 
     #[test]
@@ -272,13 +271,13 @@ mod tests {
         let mut vroom_result = [0u8; 48];
         unsafe { vroom_fp_store_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
 
-        // blst doesn't have fp_neg directly, compute 0 - a
+        // blst: compute 0 - a for negation
         let mut blst_result = blst::blst_fp::default();
         let zero = blst::blst_fp::default();
         unsafe { blst::blst_fp_sub(&mut blst_result, &zero, &a) };
         let blst_bytes = blst_fp_to_le(&blst_result);
 
-        assert!(fp_bytes_eq(&vroom_result, &blst_bytes), "Fp neg mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fp neg mismatch");
     }
 
     #[test]
@@ -289,17 +288,16 @@ mod tests {
 
         unsafe {
             vroom_fp_load_a(ctx.ptr(), a_bytes.as_ptr());
-            vroom_fp_double(ctx.ptr());
         }
 
         let mut vroom_result = [0u8; 48];
-        unsafe { vroom_fp_store_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
+        unsafe { vroom_fp_double_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
 
         let mut blst_result = blst::blst_fp::default();
         unsafe { blst::blst_fp_add(&mut blst_result, &a, &a) };
         let blst_bytes = blst_fp_to_le(&blst_result);
 
-        assert!(fp_bytes_eq(&vroom_result, &blst_bytes), "Fp double mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fp double mismatch");
     }
 
     #[test]
@@ -320,7 +318,7 @@ mod tests {
         unsafe { blst::blst_fp_inverse(&mut blst_result, &a) };
         let blst_bytes = blst_fp_to_le(&blst_result);
 
-        assert!(fp_bytes_eq(&vroom_result, &blst_bytes), "Fp invert mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fp invert mismatch");
     }
 
     // ---- Fr tests ----
@@ -336,17 +334,16 @@ mod tests {
         unsafe {
             vroom_fr_load_a(ctx.ptr(), a_bytes.as_ptr());
             vroom_fr_load_b(ctx.ptr(), b_bytes.as_ptr());
-            vroom_fr_add(ctx.ptr());
         }
 
         let mut vroom_result = [0u8; 32];
-        unsafe { vroom_fr_store_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
+        unsafe { vroom_fr_add_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
 
         let mut blst_result = blst::blst_fr::default();
         unsafe { blst::blst_fr_add(&mut blst_result, &a, &b) };
         let blst_bytes = blst_fr_to_le(&blst_result);
 
-        assert!(fr_bytes_eq(&vroom_result, &blst_bytes), "Fr add mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fr add mismatch");
     }
 
     #[test]
@@ -360,17 +357,16 @@ mod tests {
         unsafe {
             vroom_fr_load_a(ctx.ptr(), a_bytes.as_ptr());
             vroom_fr_load_b(ctx.ptr(), b_bytes.as_ptr());
-            vroom_fr_sub(ctx.ptr());
         }
 
         let mut vroom_result = [0u8; 32];
-        unsafe { vroom_fr_store_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
+        unsafe { vroom_fr_sub_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
 
         let mut blst_result = blst::blst_fr::default();
         unsafe { blst::blst_fr_sub(&mut blst_result, &a, &b) };
         let blst_bytes = blst_fr_to_le(&blst_result);
 
-        assert!(fr_bytes_eq(&vroom_result, &blst_bytes), "Fr sub mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fr sub mismatch");
     }
 
     #[test]
@@ -394,7 +390,7 @@ mod tests {
         unsafe { blst::blst_fr_mul(&mut blst_result, &a, &b) };
         let blst_bytes = blst_fr_to_le(&blst_result);
 
-        assert!(fr_bytes_eq(&vroom_result, &blst_bytes), "Fr mul mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fr mul mismatch");
     }
 
     #[test]
@@ -415,7 +411,7 @@ mod tests {
         unsafe { blst::blst_fr_sqr(&mut blst_result, &a) };
         let blst_bytes = blst_fr_to_le(&blst_result);
 
-        assert!(fr_bytes_eq(&vroom_result, &blst_bytes), "Fr square mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fr square mismatch");
     }
 
     #[test]
@@ -432,13 +428,12 @@ mod tests {
         let mut vroom_result = [0u8; 32];
         unsafe { vroom_fr_store_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
 
-        // Compute 0 - a for negation
         let mut blst_result = blst::blst_fr::default();
         let zero = blst::blst_fr::default();
         unsafe { blst::blst_fr_sub(&mut blst_result, &zero, &a) };
         let blst_bytes = blst_fr_to_le(&blst_result);
 
-        assert!(fr_bytes_eq(&vroom_result, &blst_bytes), "Fr neg mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fr neg mismatch");
     }
 
     #[test]
@@ -449,17 +444,16 @@ mod tests {
 
         unsafe {
             vroom_fr_load_a(ctx.ptr(), a_bytes.as_ptr());
-            vroom_fr_double(ctx.ptr());
         }
 
         let mut vroom_result = [0u8; 32];
-        unsafe { vroom_fr_store_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
+        unsafe { vroom_fr_double_result(ctx.ptr(), vroom_result.as_mut_ptr()) };
 
         let mut blst_result = blst::blst_fr::default();
         unsafe { blst::blst_fr_add(&mut blst_result, &a, &a) };
         let blst_bytes = blst_fr_to_le(&blst_result);
 
-        assert!(fr_bytes_eq(&vroom_result, &blst_bytes), "Fr double mismatch");
+        assert_eq!(vroom_result, blst_bytes, "Fr double mismatch");
     }
 
     #[test]
@@ -489,9 +483,6 @@ mod tests {
         // Should be 1 in LE: [1, 0, 0, ..., 0]
         let mut one_bytes = [0u8; 32];
         one_bytes[0] = 1;
-        assert!(
-            fr_bytes_eq(&product_bytes, &one_bytes),
-            "Fr invert: a * a^(-1) != 1"
-        );
+        assert_eq!(product_bytes, one_bytes, "Fr invert: a * a^(-1) != 1");
     }
 }

@@ -11,14 +11,14 @@
 #include "../vroom/src/inversion.hpp"
 
 #include <cstdint>
+#include <cstring>
 
 // ----- BLS12-381 field types -----
 
 // Base field Fp (381 bits, 8 limbs)
 using FpRing = BoundedRing<381, 8, 52, -1932, 2377, 12>;
 
-// Scalar field Fr (255 bits, 6 limbs)
-// FrRing is already defined in fr.hpp
+// Scalar field Fr (255 bits, 6 limbs) — FrRing defined in fr.hpp
 
 // ----- Modulus hex strings -----
 
@@ -30,6 +30,8 @@ static const char* fr_modulus_hex =
     "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001";
 
 // ----- Context structs -----
+// scratch buffer stores non-StandardElement results (add/sub/double)
+// to prevent dead-code elimination in benchmarks.
 
 struct VroomFpContext {
     FpRing ring;
@@ -37,6 +39,7 @@ struct VroomFpContext {
     FpRing::StandardElement a;
     FpRing::StandardElement b;
     FpRing::StandardElement result;
+    alignas(64) uint8_t scratch[1024];
 
     VroomFpContext()
         : ring(BigInt(fp_modulus_hex, 16))
@@ -52,6 +55,7 @@ struct VroomFrContext {
     FrRing::StandardElement a;
     FrRing::StandardElement b;
     FrRing::StandardElement result;
+    alignas(64) uint8_t scratch[1024];
 
     VroomFrContext()
         : ring(BigInt(fr_modulus_hex, 16))
