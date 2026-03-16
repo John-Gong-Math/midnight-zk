@@ -10,6 +10,7 @@
 #include "../vroom/src/fr.hpp"
 #include "../vroom/src/inversion.hpp"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 
@@ -29,15 +30,19 @@ static const char* fp_modulus_hex =
 static const char* fr_modulus_hex =
     "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001";
 
+// ----- Batch size for latency-hiding benchmarks -----
+static constexpr int FP_BATCH = 6;
+static constexpr int FR_BATCH = 6;
+
 // ----- Context structs -----
-// scratch buffer stores non-StandardElement results (add/sub/double)
-// to prevent dead-code elimination in benchmarks.
 
 struct VroomFpContext {
     FpRing ring;
     BLS381AddChainInversion<FpRing> inverter;
     FpRing::StandardElement a;
     FpRing::StandardElement b;
+    FpRing::StandardElement c;
+    FpRing::StandardElement d;
     FpRing::StandardElement result;
     alignas(64) uint8_t scratch[1024];
 
@@ -46,6 +51,8 @@ struct VroomFpContext {
         , inverter(ring)
         , a(FpRing::zero())
         , b(FpRing::zero())
+        , c(FpRing::zero())
+        , d(FpRing::zero())
         , result(FpRing::zero())
     {}
 };
@@ -54,6 +61,8 @@ struct VroomFrContext {
     FrRing ring;
     FrRing::StandardElement a;
     FrRing::StandardElement b;
+    FrRing::StandardElement c;
+    FrRing::StandardElement d;
     FrRing::StandardElement result;
     alignas(64) uint8_t scratch[1024];
 
@@ -61,6 +70,40 @@ struct VroomFrContext {
         : ring(BigInt(fr_modulus_hex, 16))
         , a(FrRing::zero())
         , b(FrRing::zero())
+        , c(FrRing::zero())
+        , d(FrRing::zero())
         , result(FrRing::zero())
     {}
+};
+
+// ----- Batch context structs for latency-hiding benchmarks -----
+
+struct VroomFpBatchContext {
+    FpRing ring;
+    std::array<FpRing::StandardElement, FP_BATCH> a;
+    std::array<FpRing::StandardElement, FP_BATCH> b;
+
+    VroomFpBatchContext()
+        : ring(BigInt(fp_modulus_hex, 16))
+    {
+        for (int i = 0; i < FP_BATCH; i++) {
+            a[i] = FpRing::zero();
+            b[i] = FpRing::zero();
+        }
+    }
+};
+
+struct VroomFrBatchContext {
+    FrRing ring;
+    std::array<FrRing::StandardElement, FR_BATCH> a;
+    std::array<FrRing::StandardElement, FR_BATCH> b;
+
+    VroomFrBatchContext()
+        : ring(BigInt(fr_modulus_hex, 16))
+    {
+        for (int i = 0; i < FR_BATCH; i++) {
+            a[i] = FrRing::zero();
+            b[i] = FrRing::zero();
+        }
+    }
 };

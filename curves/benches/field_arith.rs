@@ -1,11 +1,14 @@
 //! Benchmark field arithmetic operations.
-//! It measures the base field `Fp` and scalar field `Scalar` from the Bls12-381
-//! curve. Note: The bencharks are generic and can be easily extended for Jubjub
-//! scalar field and G2 base field Fp2.
 //!
-//! To run this benchmark:
+//! Benchmarks:
+//! - Single field ops (add, sub, mul, square, neg, double, invert, pow, sqrt)
+//! - VROOM single ops (same set, via AVX512-IFMA RNS Montgomery)
+//! - 2^20 multiplication chain: sequential a = a*b (serial latency)
+//! - 2^20 batched multiplications: batch_modmul<6> (latency hiding)
+//! - Sum of 2 products: a*b + c*d (shared reduction)
+//! - VROOM inversion via GMP (convert-invert-convert optimization)
 //!
-//!     cargo bench --bench field_arith
+//! To run: cargo bench --bench field_arith -p midnight-curves
 
 use std::hint::black_box;
 
@@ -17,8 +20,12 @@ use rand_xorshift::XorShiftRng;
 use vroom_fields_sys::*;
 
 const SEED: [u8; 16] = [
-    0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc, 0xe5,
+    0x59, 0x62, 0xbe, 0x5d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
+    0xe5,
 ];
+
+const N_MULS: u64 = 1 << 20; // 2^20 multiplications
+const BATCH_SIZE: u64 = 6; // Must match FP_BATCH/FR_BATCH in C++
 
 fn bench_field_arithmetic<F: Field>(c: &mut Criterion, name: &'static str) {
     let mut rng = XorShiftRng::from_seed(SEED);
@@ -91,53 +98,46 @@ fn bench_bls_scalar_field(c: &mut Criterion) {
     bench_field_arithmetic::<Fq>(c, "scalar-field")
 }
 
-// ----- VROOM benchmarks -----
+// =========================================================================
+//  VROOM single-op benchmarks (same groups as native for side-by-side)
+// =========================================================================
 
 fn bench_vroom_fp_arithmetic(c: &mut Criterion) {
     let mut rng = XorShiftRng::from_seed(SEED);
     let a = Fp::random(&mut rng);
     let b = Fp::random(&mut rng);
 
-    let a_bytes = a.to_bytes_le();
-    let b_bytes = b.to_bytes_le();
-
     let ctx = unsafe { vroom_fp_ctx_new() };
     assert!(!ctx.is_null());
     unsafe {
-        vroom_fp_load_a(ctx, a_bytes.as_ptr());
-        vroom_fp_load_b(ctx, b_bytes.as_ptr());
+        vroom_fp_load_a(ctx, a.to_bytes_le().as_ptr());
+        vroom_fp_load_b(ctx, b.to_bytes_le().as_ptr());
     }
 
     let mut group = c.benchmark_group("base-field arithmetic");
     group.significance_level(0.1).sample_size(1000);
     group.throughput(Throughput::Elements(1));
 
-    group.bench_function("vroom_base-field_add", |bencher| {
-        bencher.iter(|| unsafe { vroom_fp_add(black_box(ctx)) })
+    group.bench_function("vroom_base-field_add", |b| {
+        b.iter(|| unsafe { vroom_fp_add(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_base-field_sub", |bencher| {
-        bencher.iter(|| unsafe { vroom_fp_sub(black_box(ctx)) })
+    group.bench_function("vroom_base-field_sub", |b| {
+        b.iter(|| unsafe { vroom_fp_sub(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_base-field_double", |bencher| {
-        bencher.iter(|| unsafe { vroom_fp_double(black_box(ctx)) })
+    group.bench_function("vroom_base-field_double", |b| {
+        b.iter(|| unsafe { vroom_fp_double(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_base-field_neg", |bencher| {
-        bencher.iter(|| unsafe { vroom_fp_neg(black_box(ctx)) })
+    group.bench_function("vroom_base-field_neg", |b| {
+        b.iter(|| unsafe { vroom_fp_neg(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_base-field_mul", |bencher| {
-        bencher.iter(|| unsafe { vroom_fp_mul(black_box(ctx)) })
+    group.bench_function("vroom_base-field_mul", |b| {
+        b.iter(|| unsafe { vroom_fp_mul(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_base-field_square", |bencher| {
-        bencher.iter(|| unsafe { vroom_fp_square(black_box(ctx)) })
+    group.bench_function("vroom_base-field_square", |b| {
+        b.iter(|| unsafe { vroom_fp_square(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_base-field_invert", |bencher| {
-        bencher.iter(|| unsafe { vroom_fp_invert(black_box(ctx)) })
+    group.bench_function("vroom_base-field_invert", |b| {
+        b.iter(|| unsafe { vroom_fp_invert(black_box(ctx)) })
     });
 
     group.finish();
@@ -149,50 +149,263 @@ fn bench_vroom_fr_arithmetic(c: &mut Criterion) {
     let a = Fq::random(&mut rng);
     let b = Fq::random(&mut rng);
 
-    let a_bytes = a.to_bytes_le();
-    let b_bytes = b.to_bytes_le();
-
     let ctx = unsafe { vroom_fr_ctx_new() };
     assert!(!ctx.is_null());
     unsafe {
-        vroom_fr_load_a(ctx, a_bytes.as_ptr());
-        vroom_fr_load_b(ctx, b_bytes.as_ptr());
+        vroom_fr_load_a(ctx, a.to_bytes_le().as_ptr());
+        vroom_fr_load_b(ctx, b.to_bytes_le().as_ptr());
     }
 
     let mut group = c.benchmark_group("scalar-field arithmetic");
     group.significance_level(0.1).sample_size(1000);
     group.throughput(Throughput::Elements(1));
 
-    group.bench_function("vroom_scalar-field_add", |bencher| {
-        bencher.iter(|| unsafe { vroom_fr_add(black_box(ctx)) })
+    group.bench_function("vroom_scalar-field_add", |b| {
+        b.iter(|| unsafe { vroom_fr_add(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_scalar-field_sub", |bencher| {
-        bencher.iter(|| unsafe { vroom_fr_sub(black_box(ctx)) })
+    group.bench_function("vroom_scalar-field_sub", |b| {
+        b.iter(|| unsafe { vroom_fr_sub(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_scalar-field_double", |bencher| {
-        bencher.iter(|| unsafe { vroom_fr_double(black_box(ctx)) })
+    group.bench_function("vroom_scalar-field_double", |b| {
+        b.iter(|| unsafe { vroom_fr_double(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_scalar-field_neg", |bencher| {
-        bencher.iter(|| unsafe { vroom_fr_neg(black_box(ctx)) })
+    group.bench_function("vroom_scalar-field_neg", |b| {
+        b.iter(|| unsafe { vroom_fr_neg(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_scalar-field_mul", |bencher| {
-        bencher.iter(|| unsafe { vroom_fr_mul(black_box(ctx)) })
+    group.bench_function("vroom_scalar-field_mul", |b| {
+        b.iter(|| unsafe { vroom_fr_mul(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_scalar-field_square", |bencher| {
-        bencher.iter(|| unsafe { vroom_fr_square(black_box(ctx)) })
+    group.bench_function("vroom_scalar-field_square", |b| {
+        b.iter(|| unsafe { vroom_fr_square(black_box(ctx)) })
     });
-
-    group.bench_function("vroom_scalar-field_invert", |bencher| {
-        bencher.iter(|| unsafe { vroom_fr_invert(black_box(ctx)) })
+    group.bench_function("vroom_scalar-field_invert", |b| {
+        b.iter(|| unsafe { vroom_fr_invert(black_box(ctx)) })
     });
 
     group.finish();
     unsafe { vroom_fr_ctx_free(ctx) };
+}
+
+// =========================================================================
+//  2^20 multiplication chain benchmarks
+// =========================================================================
+
+fn bench_mul_chain(c: &mut Criterion) {
+    let mut rng = XorShiftRng::from_seed(SEED);
+
+    // --- Fp ---
+    let fp_a = Fp::random(&mut rng);
+    let fp_b = Fp::random(&mut rng);
+    let fq_a = Fq::random(&mut rng);
+    let fq_b = Fq::random(&mut rng);
+
+    let mut group = c.benchmark_group("mul_chain_2^20");
+    group.significance_level(0.1).sample_size(10);
+    group.throughput(Throughput::Elements(N_MULS));
+
+    // Native blst Fp chain
+    group.bench_function("blst_Fp_chain", |bencher| {
+        bencher.iter(|| {
+            let mut a = fp_a;
+            for _ in 0..N_MULS {
+                a = a.mul(&fp_b);
+            }
+            black_box(a)
+        })
+    });
+
+    // VROOM Fp sequential chain
+    {
+        let ctx = unsafe { vroom_fp_ctx_new() };
+        unsafe {
+            vroom_fp_load_a(ctx, fp_a.to_bytes_le().as_ptr());
+            vroom_fp_load_b(ctx, fp_b.to_bytes_le().as_ptr());
+        }
+        group.bench_function("vroom_Fp_chain", |bencher| {
+            bencher.iter(|| {
+                // Reload a for each iteration
+                unsafe {
+                    vroom_fp_load_a(ctx, fp_a.to_bytes_le().as_ptr());
+                    vroom_fp_mul_chain(black_box(ctx), N_MULS);
+                }
+            })
+        });
+        unsafe { vroom_fp_ctx_free(ctx) };
+    }
+
+    // VROOM Fp batched chain (6 parallel chains, same total muls)
+    {
+        let batch_ctx = unsafe { vroom_fp_batch_ctx_new() };
+        let mut rng2 = XorShiftRng::from_seed(SEED);
+        let fp_pairs: Vec<(Fp, Fp)> = (0..BATCH_SIZE)
+            .map(|_| (Fp::random(&mut rng2), Fp::random(&mut rng2)))
+            .collect();
+        for (i, (a, b)) in fp_pairs.iter().enumerate() {
+            unsafe {
+                vroom_fp_batch_load(
+                    batch_ctx,
+                    i as i32,
+                    a.to_bytes_le().as_ptr(),
+                    b.to_bytes_le().as_ptr(),
+                );
+            }
+        }
+        let n_iters = N_MULS / BATCH_SIZE;
+        group.bench_function("vroom_Fp_batch6_chain", |bencher| {
+            bencher.iter(|| {
+                // Reload for each criterion iteration
+                for (i, (a, b)) in fp_pairs.iter().enumerate() {
+                    unsafe {
+                        vroom_fp_batch_load(
+                            batch_ctx,
+                            i as i32,
+                            a.to_bytes_le().as_ptr(),
+                            b.to_bytes_le().as_ptr(),
+                        );
+                    }
+                }
+                unsafe { vroom_fp_batch_mul_chain(black_box(batch_ctx), n_iters) }
+            })
+        });
+        unsafe { vroom_fp_batch_ctx_free(batch_ctx) };
+    }
+
+    // Native blst Fr chain
+    group.bench_function("blst_Fr_chain", |bencher| {
+        bencher.iter(|| {
+            let mut a = fq_a;
+            for _ in 0..N_MULS {
+                a = a.mul(&fq_b);
+            }
+            black_box(a)
+        })
+    });
+
+    // VROOM Fr sequential chain
+    {
+        let ctx = unsafe { vroom_fr_ctx_new() };
+        unsafe {
+            vroom_fr_load_a(ctx, fq_a.to_bytes_le().as_ptr());
+            vroom_fr_load_b(ctx, fq_b.to_bytes_le().as_ptr());
+        }
+        group.bench_function("vroom_Fr_chain", |bencher| {
+            bencher.iter(|| {
+                unsafe {
+                    vroom_fr_load_a(ctx, fq_a.to_bytes_le().as_ptr());
+                    vroom_fr_mul_chain(black_box(ctx), N_MULS);
+                }
+            })
+        });
+        unsafe { vroom_fr_ctx_free(ctx) };
+    }
+
+    // VROOM Fr batched chain
+    {
+        let batch_ctx = unsafe { vroom_fr_batch_ctx_new() };
+        let mut rng2 = XorShiftRng::from_seed(SEED);
+        let fr_pairs: Vec<(Fq, Fq)> = (0..BATCH_SIZE)
+            .map(|_| (Fq::random(&mut rng2), Fq::random(&mut rng2)))
+            .collect();
+        for (i, (a, b)) in fr_pairs.iter().enumerate() {
+            unsafe {
+                vroom_fr_batch_load(
+                    batch_ctx,
+                    i as i32,
+                    a.to_bytes_le().as_ptr(),
+                    b.to_bytes_le().as_ptr(),
+                );
+            }
+        }
+        let n_iters = N_MULS / BATCH_SIZE;
+        group.bench_function("vroom_Fr_batch6_chain", |bencher| {
+            bencher.iter(|| {
+                for (i, (a, b)) in fr_pairs.iter().enumerate() {
+                    unsafe {
+                        vroom_fr_batch_load(
+                            batch_ctx,
+                            i as i32,
+                            a.to_bytes_le().as_ptr(),
+                            b.to_bytes_le().as_ptr(),
+                        );
+                    }
+                }
+                unsafe { vroom_fr_batch_mul_chain(black_box(batch_ctx), n_iters) }
+            })
+        });
+        unsafe { vroom_fr_batch_ctx_free(batch_ctx) };
+    }
+
+    group.finish();
+}
+
+// =========================================================================
+//  Sum of 2 products benchmark: a*b + c*d
+// =========================================================================
+
+fn bench_sum_of_products(c: &mut Criterion) {
+    let mut rng = XorShiftRng::from_seed(SEED);
+    let fp_a = Fp::random(&mut rng);
+    let fp_b = Fp::random(&mut rng);
+    let fp_c = Fp::random(&mut rng);
+    let fp_d = Fp::random(&mut rng);
+    let fq_a = Fq::random(&mut rng);
+    let fq_b = Fq::random(&mut rng);
+    let fq_c = Fq::random(&mut rng);
+    let fq_d = Fq::random(&mut rng);
+
+    let mut group = c.benchmark_group("sum_of_2_products");
+    group.significance_level(0.1).sample_size(1000);
+    group.throughput(Throughput::Elements(1));
+
+    // blst Fp: 2 muls + 1 add
+    group.bench_function("blst_Fp_2muls_add", |bencher| {
+        bencher.iter(|| {
+            let ab = black_box(&fp_a).mul(black_box(&fp_b));
+            let cd = black_box(&fp_c).mul(black_box(&fp_d));
+            black_box(ab.add(&cd))
+        })
+    });
+
+    // VROOM Fp: single reduction
+    {
+        let ctx = unsafe { vroom_fp_ctx_new() };
+        unsafe {
+            vroom_fp_load_a(ctx, fp_a.to_bytes_le().as_ptr());
+            vroom_fp_load_b(ctx, fp_b.to_bytes_le().as_ptr());
+            vroom_fp_load_c(ctx, fp_c.to_bytes_le().as_ptr());
+            vroom_fp_load_d(ctx, fp_d.to_bytes_le().as_ptr());
+        }
+        group.bench_function("vroom_Fp_sum2prod", |bencher| {
+            bencher.iter(|| unsafe { vroom_fp_sum_of_2_products(black_box(ctx)) })
+        });
+        unsafe { vroom_fp_ctx_free(ctx) };
+    }
+
+    // blst Fr: 2 muls + 1 add
+    group.bench_function("blst_Fr_2muls_add", |bencher| {
+        bencher.iter(|| {
+            let ab = black_box(&fq_a).mul(black_box(&fq_b));
+            let cd = black_box(&fq_c).mul(black_box(&fq_d));
+            black_box(ab.add(&cd))
+        })
+    });
+
+    // VROOM Fr: single reduction
+    {
+        let ctx = unsafe { vroom_fr_ctx_new() };
+        unsafe {
+            vroom_fr_load_a(ctx, fq_a.to_bytes_le().as_ptr());
+            vroom_fr_load_b(ctx, fq_b.to_bytes_le().as_ptr());
+            vroom_fr_load_c(ctx, fq_c.to_bytes_le().as_ptr());
+            vroom_fr_load_d(ctx, fq_d.to_bytes_le().as_ptr());
+        }
+        group.bench_function("vroom_Fr_sum2prod", |bencher| {
+            bencher.iter(|| unsafe { vroom_fr_sum_of_2_products(black_box(ctx)) })
+        });
+        unsafe { vroom_fr_ctx_free(ctx) };
+    }
+
+    group.finish();
 }
 
 criterion_group!(
@@ -201,5 +414,7 @@ criterion_group!(
     bench_bls_scalar_field,
     bench_vroom_fp_arithmetic,
     bench_vroom_fr_arithmetic,
+    bench_mul_chain,
+    bench_sum_of_products,
 );
 criterion_main!(benches);
