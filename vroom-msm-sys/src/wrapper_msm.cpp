@@ -167,4 +167,42 @@ bool vroom_g1_msm_point_parallel_matches_serial(
     return sx == px && sy == py;
 }
 
+void vroom_g1_msm_auto_parallel(void* ctx_ptr, const void* points_ptr,
+                                 const void* scalars_ptr, size_t npoints,
+                                 size_t num_threads) {
+    auto* ctx = static_cast<VroomContext*>(ctx_ptr);
+    auto* pts = static_cast<const VroomPoints*>(points_ptr);
+    auto* sc = static_cast<const VroomScalars*>(scalars_ptr);
+
+    auto result = msm_auto_parallel(ctx->curve, ctx->ring,
+                                     pts->data.data(), sc->ptrs.data(),
+                                     npoints, 255, num_threads);
+
+    g_msm_sink ^= result.z.m2.to_unsigned_array()[0];
+}
+
+bool vroom_g1_msm_auto_parallel_matches_serial(
+    void* ctx_ptr,
+    const void* points_ptr,
+    const void* scalars_ptr,
+    size_t npoints,
+    size_t num_threads
+) {
+    auto* ctx = static_cast<VroomContext*>(ctx_ptr);
+    auto* pts = static_cast<const VroomPoints*>(points_ptr);
+    auto* sc = static_cast<const VroomScalars*>(scalars_ptr);
+
+    auto serial = msm(ctx->curve, ctx->ring,
+                      pts->data.data(), sc->ptrs.data(),
+                      npoints, 255);
+    auto auto_par = msm_auto_parallel(ctx->curve, ctx->ring,
+                                       pts->data.data(), sc->ptrs.data(),
+                                       npoints, 255, num_threads);
+
+    auto [sx, sy] = proj_to_affine_bigint(serial, ctx->ring);
+    auto [ax, ay] = proj_to_affine_bigint(auto_par, ctx->ring);
+
+    return sx == ax && sy == ay;
+}
+
 } // extern "C"

@@ -217,6 +217,33 @@ fn msm_vroom(c: &mut Criterion) {
         });
     }
 
+    // Point-parallel thread count sweep (T=4,8,12).
+    for t in [4usize, 8, 12] {
+        for k in MULTICORE_RANGE {
+            if *k < 14 {
+                continue;
+            }
+            let n: usize = 1 << k;
+            let id = format!("vroom_pp_{t}t_256b_{k}");
+            group.bench_function(BenchmarkId::new("Vroom_pp_sweep", &id), |b| {
+                b.iter(|| unsafe {
+                    vroom_msm_sys::vroom_g1_msm_point_parallel(ctx, points, scalars, n, t)
+                })
+            });
+        }
+    }
+
+    // Auto-dispatching parallel VROOM.
+    for k in MULTICORE_RANGE {
+        let n: usize = 1 << k;
+        let id = format!("vroom_auto_{num_threads}t_256b_{k}");
+        group.bench_function(BenchmarkId::new("Vroom_auto", &id), |b| {
+            b.iter(|| unsafe {
+                vroom_msm_sys::vroom_g1_msm_auto_parallel(ctx, points, scalars, n, num_threads)
+            })
+        });
+    }
+
     unsafe {
         vroom_msm_sys::vroom_free_scalars(scalars);
         vroom_msm_sys::vroom_free_points(points);
